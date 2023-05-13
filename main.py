@@ -41,7 +41,7 @@ def load_sprite_sheets(dir1, dir2, width, height, direction=False):
             all_sprites[image.replace(".png", "") + "_right"] = sprites
             all_sprites[image.replace(".png", "") + "_left"] = flip(sprites)
         else:
-            all_sprites[image.replace("png", "")] = sprites
+            all_sprites[image.replace(".png", "")] = sprites
 
     return all_sprites
 
@@ -71,6 +71,8 @@ class Player(pygame.sprite.Sprite):
         self.animation_count = 0
         self.fall_count = 0
         self.jump_count = 0
+        self.hit = False
+        self.hit_count = 0
 
     def jump(self):
         self.y_vel = -self.GRAVITY * 8
@@ -82,6 +84,10 @@ class Player(pygame.sprite.Sprite):
     def move(self, dx, dy):
         self.rect.x += dx
         self.rect.y += dy
+
+    def make_hit(self):
+        self.hit = True
+        self.hit_count = 0
 
     def move_left(self, vel):
         self.x_vel = -vel
@@ -99,6 +105,12 @@ class Player(pygame.sprite.Sprite):
         self.y_vel += min(1, (self.fall_count / fps) * self.GRAVITY)
         self.move(self.x_vel, self.y_vel)
 
+        if self.hit:
+            self.hit_count += 1
+        if self.hit_count > FPS * 2:
+            self.hit = False
+            self.hit_count = 0
+
         self.fall_count += 1
         self.update_sprite()
 
@@ -113,7 +125,9 @@ class Player(pygame.sprite.Sprite):
 
     def update_sprite(self):
         sprite_sheet = "idle"
-        if self.y_vel < 0:
+        if self.hit:
+            sprite_sheet = "hit"
+        elif self.y_vel < 0:
             if self.jump_count == 1:
                 sprite_sheet = "jump"
             elif self.jump_count == 2:
@@ -134,8 +148,8 @@ class Player(pygame.sprite.Sprite):
         self.rect = self.sprite.get_rect(topleft=(self.rect.x, self.rect.y))
         self.mask = pygame.mask.from_surface(self.sprite)
 
-    def draw(self, win):
-        win.blit(self.sprite, (self.rect.x, self.rect.y))
+    def draw(self, win, offset_x):
+        win.blit(self.sprite, (self.rect.x - offset_x, self.rect.y))
 
 
 class Object(pygame.sprite.Sprite):
@@ -147,17 +161,47 @@ class Object(pygame.sprite.Sprite):
         self.height = height
         self.name = name
 
-    def draw(self, win):
-        win.blit(self.image, (self.rect.x, self.rect.y))
+    def draw(self, win, offset_x):
+        win.blit(self.image, (self.rect.x - offset_x, self.rect.y))
 
 
 class Block(Object):
-    def __init__(self, x, y, width, height, name=None):
+    def __init__(self, x, y, width, height, name="block"):
         super().__init__(x, y, width, height, name)
         block = get_block(width, height)
         # self.image = block
         self.image.blit(block, (0, 0))
         self.mask = pygame.mask.from_surface(self.image)
+
+
+class Fire(Object):
+    ANIMATION_DELAY = 3
+
+    def __init__(self, x, y, width, height):
+        super().__init__(x, y, width, height, name="fire")
+        self.fire = load_sprite_sheets("Traps", "Fire", width, height)
+        self.image = self.fire["off"][0]
+        self.mask = pygame.mask.from_surface(self.image)
+        self.animation_count = 0
+        self.animation_name = "off"
+
+    def on(self):
+        self.animation_name = "on"
+
+    def off(self):
+        self.animation_name = "off"
+
+    def loop(self):
+        sprites = self.fire[self.animation_name]
+        sprite_index = (self.animation_count // self.ANIMATION_DELAY) % len(sprites)
+        self.image = sprites[sprite_index]
+        self.animation_count += 1
+
+        self.rect = self.image.get_rect(topleft=(self.rect.x, self.rect.y))
+        self.mask = pygame.mask.from_surface(self.image)
+
+        if self.animation_count // self.ANIMATION_DELAY > len(sprites):
+            self.animation_count = 0
 
 
 def get_background(name):
@@ -173,14 +217,14 @@ def get_background(name):
     return tiles, image
 
 
-def draw(window, background, bg_image, player, objects):
+def draw(window, background, bg_image, player, objects, offset_x):
     for tile in background:
         window.blit(bg_image, tile)
 
     for obj in objects:
-        obj.draw(window)
+        obj.draw(window, offset_x)
 
-    player.draw(window)
+    player.draw(window, offset_x)
 
     pygame.display.update()
 
@@ -192,25 +236,47 @@ def handle_vertical_collision(player, objects, dy):
             if dy > 0:
                 player.rect.bottom = obj.rect.top
                 player.landed()
-            if dy < 0:
+            elif dy < 0:
                 player.rect.top = obj.rect.bottom
                 player.hit_head()
 
-        collided_objects.append(obj)
+            collided_objects.append(obj)
 
     return collided_objects
+
+
+def collide(player, objects, dx):
+    player.move(dx, 0)
+    player.update()
+    collided_object = None
+
+    for obj in objects:
+        if pygame.sprite.collide_mask(player, obj):
+            collided_object = obj
+            break
+
+    player.move(-dx, 0)
+    player.update()
+    return collided_object
 
 
 def handle_move(player, objects):
     keys = pygame.key.get_pressed()
 
     player.x_vel = 0
-    if keys[pygame.K_LEFT]:
+    collide_left = collide(player, objects, -PLAYER_VEL * 2)
+    collide_right = collide(player, objects, PLAYER_VEL * 2)
+
+    if keys[pygame.K_LEFT] and not collide_left:
         player.move_left(PLAYER_VEL)
-    if keys[pygame.K_RIGHT]:
+    if keys[pygame.K_RIGHT] and not collide_right:
         player.move_right(PLAYER_VEL)
 
-    handle_vertical_collision(player, objects, player.y_vel)
+    vertical_collide = handle_vertical_collision(player, objects, player.y_vel)
+    to_check = [collide_left, collide_right, *vertical_collide]
+    for obj in to_check:
+        if obj and obj.name == "fire":
+            player.make_hit()
 
 
 def main(window):
@@ -224,7 +290,18 @@ def main(window):
         Block(i * block_size, HEIGHT - block_size, block_size, block_size)
         for i in range(-WIDTH // block_size, WIDTH * 2 // block_size)
     ]
-    # block = [Block(0, HEIGHT - block_size, block_size, block_size)]
+    fire = Fire(200, HEIGHT - block_size - 64, 16, 32)
+    fire.on()
+
+    objects = [
+        *floor,
+        Block(0, HEIGHT - block_size * 2, block_size, block_size),
+        Block(block_size * 3, HEIGHT - block_size * 4, block_size, block_size),
+        fire,
+    ]
+
+    offset_x = 0
+    scroll_area_width = 200
 
     run = True
     while run:
@@ -239,8 +316,15 @@ def main(window):
                     player.jump()
 
         player.loop(FPS)
-        handle_move(player, floor)
-        draw(window, background, bg_image, player, floor)
+        fire.loop()
+        handle_move(player, objects)
+        draw(window, background, bg_image, player, objects, offset_x)
+
+        if (
+            (player.rect.right - offset_x >= WIDTH - scroll_area_width)
+            and player.x_vel > 0
+        ) or ((player.rect.left - offset_x <= scroll_area_width) and player.x_vel < 0):
+            offset_x += player.x_vel
 
     pygame.quit()
     quit()
