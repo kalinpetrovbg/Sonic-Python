@@ -55,10 +55,19 @@ def get_block(width, height):
     return pygame.transform.scale2x(surface)
 
 
+def get_orange_block(width, height):
+    path = join("assets", "Terrain", "Terrain.png")
+    image = pygame.image.load(path).convert_alpha()
+    surface = pygame.Surface((width, height), pygame.SRCALPHA, 32)
+    rect = pygame.Rect(96, 64, width, height)
+    surface.blit(image, (0, 0), rect)
+    return pygame.transform.scale2x(surface)
+
+
 class Player(pygame.sprite.Sprite):
     COLOR = (255, 0, 0)
     GRAVITY = 1
-    SPRITES = load_sprite_sheets("MainCharacters", "VirtualGuy", 32, 32, True)
+    SPRITES = load_sprite_sheets("MainCharacters", "Sonic", 32, 32, True)
     ANIMATION_DELAY = 3
 
     def __init__(self, x, y, width, height):
@@ -174,6 +183,15 @@ class Block(Object):
         self.mask = pygame.mask.from_surface(self.image)
 
 
+class OrangeBlock(Object):
+    def __init__(self, x, y, width, height, name="block"):
+        super().__init__(x, y, width, height, name)
+        block = get_orange_block(width, height)
+        # self.image = block
+        self.image.blit(block, (0, 0))
+        self.mask = pygame.mask.from_surface(self.image)
+
+
 class Fire(Object):
     ANIMATION_DELAY = 3
 
@@ -193,6 +211,36 @@ class Fire(Object):
 
     def loop(self):
         sprites = self.fire[self.animation_name]
+        sprite_index = (self.animation_count // self.ANIMATION_DELAY) % len(sprites)
+        self.image = sprites[sprite_index]
+        self.animation_count += 1
+
+        self.rect = self.image.get_rect(topleft=(self.rect.x, self.rect.y))
+        self.mask = pygame.mask.from_surface(self.image)
+
+        if self.animation_count // self.ANIMATION_DELAY > len(sprites):
+            self.animation_count = 0
+
+
+class Saw(Object):
+    ANIMATION_DELAY = 3
+
+    def __init__(self, x, y, width, height):
+        super().__init__(x, y, width, height, name="saw")
+        self.saw = load_sprite_sheets("Traps", "Saw", width, height)
+        self.image = self.saw["off"][0]
+        self.mask = pygame.mask.from_surface(self.image)
+        self.animation_count = 0
+        self.animation_name = "off"
+
+    def on(self):
+        self.animation_name = "on"
+
+    def off(self):
+        self.animation_name = "off"
+
+    def loop(self):
+        sprites = self.saw[self.animation_name]
         sprite_index = (self.animation_count // self.ANIMATION_DELAY) % len(sprites)
         self.image = sprites[sprite_index]
         self.animation_count += 1
@@ -290,14 +338,37 @@ def main(window):
         Block(i * block_size, HEIGHT - block_size, block_size, block_size)
         for i in range(-WIDTH // block_size, WIDTH * 2 // block_size)
     ]
-    fire = Fire(200, HEIGHT - block_size - 64, 16, 32)
-    fire.on()
+    saw = [
+        Saw(block_size * 10 + 10, HEIGHT - block_size * 2 - 76, 38, 38),
+        Saw(block_size * 11, HEIGHT - block_size * 2 - 76, 38, 38),
+    ]
+
+    for s in saw:
+        s.on()
 
     objects = [
         *floor,
-        Block(0, HEIGHT - block_size * 2, block_size, block_size),
+        OrangeBlock(0, HEIGHT - block_size * 2, block_size, block_size),
+        OrangeBlock(0, HEIGHT - block_size * 3, block_size, block_size),
+        OrangeBlock(0, HEIGHT - block_size * 4, block_size, block_size),
+        OrangeBlock(0, HEIGHT - block_size * 5, block_size, block_size),
+        OrangeBlock(0, HEIGHT - block_size * 6, block_size, block_size),
+        OrangeBlock(0, HEIGHT - block_size * 7, block_size, block_size),
+        Block(block_size * 2, HEIGHT - block_size * 4, block_size, block_size),
         Block(block_size * 3, HEIGHT - block_size * 4, block_size, block_size),
-        fire,
+        Block(block_size * 4, HEIGHT - block_size * 4, block_size, block_size),
+        Block(block_size * 4, HEIGHT - block_size * 3, block_size, block_size),
+        Block(block_size * 5, HEIGHT - block_size * 5, block_size, block_size),
+        Block(block_size * 6, HEIGHT - block_size * 5, block_size, block_size),
+        Block(block_size * 6, HEIGHT - block_size * 3, block_size, block_size),
+        Block(block_size * 7, HEIGHT - block_size * 5, block_size, block_size),
+        Block(block_size * 7, HEIGHT - block_size * 3, block_size, block_size),
+        Block(block_size * 8, HEIGHT - block_size * 3, block_size, block_size),
+        Block(block_size * 8, HEIGHT - block_size * 2, block_size, block_size),
+        Block(block_size * 9, HEIGHT - block_size * 3, block_size, block_size),
+        Block(block_size * 12, HEIGHT - block_size * 3, block_size, block_size),
+        Block(block_size * 13, HEIGHT - block_size * 3, block_size, block_size),
+        *saw,
     ]
 
     offset_x = 0
@@ -316,7 +387,8 @@ def main(window):
                     player.jump()
 
         player.loop(FPS)
-        fire.loop()
+        for s in saw:
+            s.loop()
         handle_move(player, objects)
         draw(window, background, bg_image, player, objects, offset_x)
 
